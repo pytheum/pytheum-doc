@@ -1,0 +1,337 @@
+openapi: 3.0.3
+info:
+  title: pytheum API
+  version: "0.1.0"
+  description: |
+    Point-in-time prediction-market context for AI agents. Four endpoints over
+    a unified market + event index spanning Kalshi, Polymarket, and Manifold.
+  contact:
+    url: https://github.com/pytheum/pytheum-doc
+servers:
+  - url: https://api.pytheum.com
+    description: Production
+
+paths:
+  /v1/markets/relevant-to:
+    get:
+      summary: Find markets matching a free-text query
+      operationId: findRelevantMarkets
+      parameters:
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinSimilarity'
+        - $ref: '#/components/parameters/Venue'
+        - $ref: '#/components/parameters/Status'
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum: [bundle, none]
+            default: bundle
+          description: |
+            `bundle` (default): collapse to the highest-similarity market per
+            bundle_id. `none`: return raw matches.
+      responses:
+        '200':
+          description: Ranked list of markets matching the query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/EmbeddingFailed'
+
+  /v1/markets/{market_ref}/context:
+    get:
+      summary: Events paired with a specific market
+      operationId: getMarketContext
+      parameters:
+        - $ref: '#/components/parameters/MarketRef'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinSimilarity'
+        - $ref: '#/components/parameters/Kinds'
+      responses:
+        '200':
+          description: Events from the rolling 24h window paired with this market
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketContextResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Market exists but has no embedding (not in top-N coverage)
+
+  /v1/bundles/{bundle_ref}/context:
+    get:
+      summary: Events paired with any market in a bundle, deduplicated
+      operationId: getBundleContext
+      parameters:
+        - $ref: '#/components/parameters/BundleRef'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinSimilarity'
+        - $ref: '#/components/parameters/Kinds'
+      responses:
+        '200':
+          description: Events from the rolling window, deduped by event_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BundleContextResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/events/{event_id}/related-markets:
+    get:
+      summary: Markets matched to a specific event
+      operationId: getEventRelatedMarkets
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event ID from the firehose (e.g., evt_news_headline_a1b2c3...)
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/MinSimilarity'
+        - $ref: '#/components/parameters/Venue'
+        - $ref: '#/components/parameters/Status'
+      responses:
+        '200':
+          description: Ranked list of markets paired with this event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketsResponse'
+        '404':
+          description: Event outside the rolling window (PIT replay lands in v1)
+
+components:
+  parameters:
+    Query:
+      name: query
+      in: query
+      required: true
+      schema:
+        type: string
+        maxLength: 4000
+      description: Free-form text to embed and search against the market index
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    MinSimilarity:
+      name: min_similarity
+      in: query
+      schema:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+      description: |
+        Default varies by endpoint (0.40 for relevant-to, 0.15 for context,
+        0.30 for events/related-markets). Cosine similarity floor.
+    Venue:
+      name: venue
+      in: query
+      schema:
+        type: string
+      description: Comma-separated list (kalshi,polymarket,manifold)
+    Status:
+      name: status
+      in: query
+      schema:
+        type: string
+        default: active,resolving
+      description: Comma-separated list (active,resolving,resolved)
+    Kinds:
+      name: kinds
+      in: query
+      schema:
+        type: string
+      description: |
+        Comma-separated event kinds (news_headline, social_post, hn_story,
+        macro_release). Omit for all kinds.
+    MarketRef:
+      name: market_ref
+      in: path
+      required: true
+      schema:
+        type: string
+      description: |
+        Venue-prefixed market id (e.g. `polymarket:31875`, `kalshi:KXFED-24DEC-525`).
+    BundleRef:
+      name: bundle_ref
+      in: path
+      required: true
+      schema:
+        type: string
+      description: |
+        Venue-prefixed bundle id (e.g. `polymarket:fomc`, `polymarket:politics`).
+
+  schemas:
+    Market:
+      type: object
+      properties:
+        id: { type: string, example: "polymarket:31875" }
+        question: { type: string, nullable: true }
+        venue: { type: string, enum: [kalshi, polymarket, manifold] }
+        bundle_id: { type: string, nullable: true }
+        bundle_label: { type: string, nullable: true }
+        similarity: { type: number, minimum: 0.0, maximum: 1.0 }
+        volume_usd: { type: number, nullable: true }
+        status: { type: string, enum: [active, resolving, resolved] }
+        url: { type: string, nullable: true }
+
+    Event:
+      type: object
+      properties:
+        event_id: { type: string }
+        kind:
+          type: string
+          enum: [news_headline, social_post, hn_story, macro_release]
+        ts:
+          type: string
+          format: date-time
+          description: |
+            ISO-8601 timestamp the stream observed the event (e.g.
+            `"2026-05-27T01:44:21.490701+00:00"`). May include microsecond
+            precision and explicit offset rather than `Z`.
+        snapshot:
+          $ref: '#/components/schemas/EventSnapshot'
+        similarity:
+          type: number
+          nullable: true
+          description: |
+            Cosine similarity between the event's embedding and the queried
+            market's embedding (or the queried event's embedding for the
+            related-markets endpoint). Computed at query time, [0, 1].
+        source: { type: string, enum: [embedding] }
+        matched_market_id:
+          type: string
+          nullable: true
+          description: |
+            Only set on `/v1/bundles/{ref}/context`: which child market in
+            the bundle this event paired with most strongly.
+
+    EventSnapshot:
+      type: object
+      description: |
+        Free-form payload — shape varies by `kind`. Fields below are typical
+        for `news_headline`. `social_post` and `hn_story` carry similar
+        identifying fields plus their own (e.g. `text`, `did`, `handle` for
+        Bluesky). Always present regardless of kind:
+        `_matched_market_ids` / `_matched_similarities`.
+      properties:
+        title: { type: string, nullable: true }
+        body: { type: string, nullable: true, description: "Extracted article body (news_headline only)" }
+        url: { type: string, nullable: true }
+        domain: { type: string, nullable: true }
+        author: { type: string, nullable: true }
+        published_at: { type: string, format: date-time, nullable: true }
+        fetched_at: { type: string, format: date-time, nullable: true }
+        body_fetch_state:
+          type: string
+          enum: [complete, failed, pending]
+          nullable: true
+          description: "news_headline only — state of deferred article-body fetch"
+        fetch_error: { type: string, nullable: true }
+        _matched_market_ids:
+          type: array
+          items: { type: string }
+          description: |
+            Internal: top-10 nearest market IDs the worker found when it first
+            ingested this event. Leading underscore indicates the shape may
+            change before v1. Use the top-level `similarity` for the queried
+            market's score, not these.
+        _matched_similarities:
+          type: array
+          items: { type: number }
+          description: "Internal: similarities paired with _matched_market_ids."
+
+    Meta:
+      type: object
+      properties:
+        embedding_model: { type: string, example: "openai:text-embedding-3-large" }
+        limit: { type: integer }
+        window_hours: { type: integer, example: 24, description: "context endpoints only" }
+        total_in_window:
+          type: integer
+          description: |
+            context endpoints only — number of events indexed in the rolling
+            window. Currently capped at 8000 (FIFO drop when exceeded).
+        min_similarity:
+          type: number
+          description: "context endpoints only — effective similarity floor used"
+        group_by:
+          type: string
+          description: "market endpoints only — `bundle` or `none`"
+        venues:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: |
+            market endpoints only — venues filter that was applied. `null`
+            means no filter (default).
+
+    MarketsResponse:
+      type: object
+      properties:
+        query: { type: string, nullable: true }
+        markets:
+          type: array
+          items: { $ref: '#/components/schemas/Market' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    MarketContextResponse:
+      type: object
+      properties:
+        market:
+          type: object
+          allOf: [ { $ref: '#/components/schemas/Market' } ]
+        context:
+          type: array
+          items: { $ref: '#/components/schemas/Event' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    BundleContextResponse:
+      type: object
+      properties:
+        bundle:
+          type: object
+          properties:
+            id: { type: string }
+            label: { type: string, nullable: true }
+            venue: { type: string }
+            market_count: { type: integer }
+        context:
+          type: array
+          items: { $ref: '#/components/schemas/Event' }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    Error:
+      type: object
+      properties:
+        detail: { type: string }
+
+  responses:
+    BadRequest:
+      description: Missing or invalid parameter
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    EmbeddingFailed:
+      description: Upstream embedding provider unavailable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

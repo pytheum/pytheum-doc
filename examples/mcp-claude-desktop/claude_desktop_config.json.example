@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pytheum": {
+      "command": "uvx",
+      "args": ["pytheum-mcp"],
+      "env": {
+        "PYTHEUM_API_BASE": "https://api.pytheum.com"
+      }
+    }
+  }
+}

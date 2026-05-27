@@ -1,0 +1,21 @@
+.DS_Store
+*.swp
+*.swo
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Internal-only documents — must never be committed to this public repo
+AGENT-INSTALL-MATRIX.md
+COMPETITIVE-LANDSCAPE.md
+COMPETITIVE-LANDSCAPE-DEEP.md
+SYNTHESIS-HONEST-VALUE-ASSESSMENT.md
+SUBMISSION-LOG.md
+MARKETING-CHANNELS.md
+BENCHMARK-*.md
+benchmark-*.md
+SIM-SWEEP-*.md
+EVAL-*.md
+QUALITY-REVIEW-*.md
+STRUCTURE-BENCHMARK-*.md
