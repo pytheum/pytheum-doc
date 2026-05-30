@@ -15,8 +15,9 @@ GET /v1/markets/polymarket:101772/context?limit=1
 | Query | Required | Default | Notes |
 |---|---|---|---|
 | `limit` | no | 25 | Max 200 |
-| `min_similarity` | no | 0.15 | Lower than `relevant-to` because market-question→event-body sims are naturally lower |
+| `min_similarity` | no | 0.30 | Lower than `relevant-to` because market-question→event-body sims are naturally lower |
 | `kinds` | no | all | csv: `news_headline,social_post,hn_story,macro_release` |
+| `sibling_markets` | no | `true` | Set `false` to omit the correlated-market block (below) |
 
 ## Response
 
@@ -29,8 +30,20 @@ GET /v1/markets/polymarket:101772/context?limit=1
     "bundle_id": "polymarket:economic-policy",
     "bundle_label": "Economic Policy",
     "volume_usd": 27092266.7,
-    "status": "active"
+    "status": "active",
+    "implied_yes": 0.978,
+    "resolution_criteria": "This market will resolve based on the FOMC's June 2026 interest rate decision..."
   },
+  "sibling_markets": [
+    {
+      "market_id": "polymarket:690197",
+      "question": "Fed rate hike in 2026?",
+      "venue": "polymarket",
+      "status": "active",
+      "volume_usd": 1235396.5,
+      "implied_yes": 0.315
+    }
+  ],
   "context": [
     {
       "event_id": "evt_news_headline_6a5f4539dd30",
@@ -57,11 +70,21 @@ GET /v1/markets/polymarket:101772/context?limit=1
     "window_hours": 24,
     "embedding_model": "openai:text-embedding-3-large",
     "limit": 1,
-    "min_similarity": 0.15,
-    "total_in_window": 8000
+    "min_similarity": 0.3,
+    "total_in_window": 8000,
+    "sibling_markets_count": 1
   }
 }
 ```
+
+## The market block, sibling markets, and context — three layers in one call
+
+A single `/context` call gives an agent everything it needs to reason about a position:
+
+1. **`market.implied_yes`** — the market's own current implied YES probability (0–1), from its live price. `null` for markets without a binary YES price (categorical/multi-outcome markets, or venues that don't expose a price in our listing).
+2. **`market.resolution_criteria`** — *how the market actually resolves* (the source, metric, threshold, and tiebreaks), so an agent frames the question correctly instead of guessing. `null` when the market provides no resolution text.
+3. **`sibling_markets`** — correlated markets from the same event graph, each with `volume_usd` and (when available) `implied_yes`. Lets an agent read a market against its neighbors (e.g. a rate-cut market next to a rate-hike market) in the same response. Volume-ranked, deduped, filtered to on-topic correlates.
+4. **`context`** — the supporting news/social/macro signals (below).
 
 ## When to use this
 

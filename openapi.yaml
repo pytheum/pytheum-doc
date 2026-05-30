@@ -187,6 +187,16 @@ components:
         volume_usd: { type: number, nullable: true }
         status: { type: string, enum: [active, resolving, resolved] }
         url: { type: string, nullable: true }
+        implied_yes:
+          type: number
+          nullable: true
+          minimum: 0.0
+          maximum: 1.0
+          description: Market's own current implied YES probability; null for categorical / no-price markets.
+        resolution_criteria:
+          type: string
+          nullable: true
+          description: How the market resolves (source / metric / threshold). Returned by /context; null elsewhere or when unavailable.
 
     Event:
       type: object
@@ -294,6 +304,10 @@ components:
         market:
           type: object
           allOf: [ { $ref: '#/components/schemas/Market' } ]
+        sibling_markets:
+          type: array
+          description: Correlated markets from the same event graph (volume-ranked, on-topic-filtered), each with volume_usd and implied_yes when available. Omit with ?sibling_markets=false.
+          items: { $ref: '#/components/schemas/Market' }
         context:
           type: array
           items: { $ref: '#/components/schemas/Event' }
